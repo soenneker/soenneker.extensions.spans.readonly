@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Buffers;
+using System.Diagnostics.Contracts;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -10,47 +12,50 @@ namespace Soenneker.Extensions.Spans.Readonly;
 /// </summary>
 public static class ReadOnlySpanExtension
 {
-    /// <summary>
-    /// Bytes -> SHA256 hex (uppercase by default)
-    /// </summary>
-    /// <param name="data"></param>
-    /// <param name="upperCase"></param>
-    /// <returns></returns>
+    /// <summary>Bytes → SHA-256 hex (uppercase by default)</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [Pure]
     public static string ToSha256Hex(this ReadOnlySpan<byte> data, bool upperCase = true)
     {
-        Span<byte> hash = stackalloc byte[32]; // SHA-256
-        SHA256.TryHashData(data, hash, out _); // avoids SHA256.Create()
+        Span<byte> hash = stackalloc byte[32]; // SHA-256 output
+        SHA256.TryHashData(data, hash, out _); // no SHA256.Create()
 
-        string hex = Convert.ToHexString(hash); // A-F uppercase by default
-        return upperCase ? hex : hex.ToLowerInvariant();
+        return upperCase
+            ? Convert.ToHexString(hash) // single allocation (uppercase)
+            : Convert.ToHexStringLower(hash); // single allocation (lowercase)
     }
 
-    /// <summary>
-    /// Text -> SHA256 hex (UTF-8 by default)
-    /// </summary>
-    /// <param name="text"></param>
-    /// <param name="encoding"></param>
-    /// <param name="upperCase"></param>
-    /// <returns></returns>
+    /// <summary>Text → SHA-256 hex (UTF-8 by default)</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [Pure]
     public static string ToSha256Hex(this ReadOnlySpan<char> text, Encoding? encoding = null, bool upperCase = true)
     {
         encoding ??= Encoding.UTF8;
 
         int byteCount = encoding.GetByteCount(text);
-        if (byteCount <= 1024) // stackalloc fast-path
+
+        // Stack fast-path
+        if (byteCount <= 1024)
         {
             Span<byte> tmp = stackalloc byte[byteCount];
             encoding.GetBytes(text, tmp);
 
-            ReadOnlySpan<byte> ro = tmp; // implicit conversion
-            return ro.ToSha256Hex(upperCase);
+            ReadOnlySpan<byte> implicitReadOnly = tmp;
+
+            return implicitReadOnly.ToSha256Hex(upperCase);
         }
 
+        // Pool fallback for large inputs
         byte[] rented = ArrayPool<byte>.Shared.Rent(byteCount);
         try
         {
             int written = encoding.GetBytes(text, rented);
-            return ((ReadOnlySpan<byte>) rented.AsSpan(0, written)).ToSha256Hex(upperCase);
+
+            Span<byte> span = rented.AsSpan(0, written);
+
+            ReadOnlySpan<byte> implicitReadOnly = span;
+
+            return implicitReadOnly.ToSha256Hex(upperCase);
         }
         finally
         {
