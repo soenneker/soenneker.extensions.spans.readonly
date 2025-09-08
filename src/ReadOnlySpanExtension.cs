@@ -39,10 +39,9 @@ public static class ReadOnlySpanExtension
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool LooksBinaryContent(this ReadOnlySpan<byte> utf8)
+    public static bool LooksBinary(this ReadOnlySpan<byte> utf8)
     {
-        var k = Classify(utf8);
-        return k == ContentKind.Binary;
+        return Classify(utf8) == ContentKind.Binary;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -62,6 +61,7 @@ public static class ReadOnlySpanExtension
         for (var i = 0; i < limit; i++)
         {
             byte b = utf8[i];
+
             if (b == 0) 
                 return ContentKind.Binary; // NUL -> binary
 
@@ -78,19 +78,19 @@ public static class ReadOnlySpanExtension
         while (j < utf8.Length)
         {
             byte c = utf8[j];
-            if (c is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
+
+            switch (c)
             {
-                j++;
-                continue;
+                case (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n':
+                    j++;
+                    continue;
+                case (byte)'{' or (byte)'[':
+                    return ContentKind.Json;
+                case (byte)'<':
+                    return ContentKind.XmlOrHtml;
+                default:
+                    return ContentKind.Text;
             }
-
-            if (c == (byte)'{' || c == (byte)'[') 
-                return ContentKind.Json;
-
-            if (c == (byte)'<') 
-                return ContentKind.XmlOrHtml; // includes XML and HTML
-
-            return ContentKind.Text;
         }
 
         return ContentKind.Unknown;
