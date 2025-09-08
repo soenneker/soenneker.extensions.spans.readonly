@@ -25,6 +25,25 @@ public static class ReadOnlySpanExtension
             : Convert.ToHexStringLower(hash); // single allocation (lowercase)
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool LooksLikeJson(this ReadOnlySpan<byte> utf8)
+    {
+        // Skip UTF-8 BOM if present
+        if (utf8.Length >= 3 && utf8[0] == 0xEF && utf8[1] == 0xBB && utf8[2] == 0xBF)
+            utf8 = utf8[3..];
+
+        // Skip leading whitespace
+        int i = 0;
+        while (i < utf8.Length)
+        {
+            byte c = utf8[i];
+            if (c is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') { i++; continue; }
+            // Allow either object or array as first token
+            return c == (byte)'{' || c == (byte)'[';
+        }
+        return false;
+    }
+
     /// <summary>Text → SHA-256 hex (UTF-8 by default)</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [Pure]
