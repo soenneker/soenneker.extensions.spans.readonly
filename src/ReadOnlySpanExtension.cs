@@ -14,8 +14,8 @@ namespace Soenneker.Extensions.Spans.Readonly;
 public static class ReadOnlySpanExtension
 {
     /// <summary>Bytes → SHA-256 hex (uppercase by default)</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [Pure]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string ToSha256Hex(this ReadOnlySpan<byte> data, bool upperCase = true)
     {
         Span<byte> hash = stackalloc byte[32]; // SHA-256 output
@@ -26,38 +26,41 @@ public static class ReadOnlySpanExtension
             : Convert.ToHexStringLower(hash); // single allocation (lowercase)
     }
 
+    [Pure]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool LooksLikeJson(this ReadOnlySpan<byte> utf8)
     {
         return Classify(utf8) == ContentKind.Json;
     }
 
+    [Pure]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool LooksLikeXmlOrHtml(this ReadOnlySpan<byte> utf8)
     {
         return Classify(utf8) == ContentKind.XmlOrHtml;
     }
 
+    [Pure]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool LooksBinary(this ReadOnlySpan<byte> utf8)
     {
         return Classify(utf8) == ContentKind.Binary;
     }
 
+    [Pure]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ContentKind Classify(this ReadOnlySpan<byte> utf8)
     {
-        // Skip UTF-8 BOM
+        // UTF-8 BOM
         if (utf8.Length >= 3 && utf8[0] == 0xEF && utf8[1] == 0xBB && utf8[2] == 0xBF)
             utf8 = utf8[3..];
 
         if (utf8.IsEmpty)
             return ContentKind.Unknown;
 
-        // Quick binary heuristic on a short head (controls or NULs)
+        // Quick binary heuristic (first 512 bytes)
         int limit = Math.Min(utf8.Length, 512);
         var controls = 0;
-
         for (var i = 0; i < limit; i++)
         {
             byte b = utf8[i];
@@ -70,35 +73,45 @@ public static class ReadOnlySpanExtension
                 controls++;
         }
 
-        if (controls > limit / 10) // >10% controls -> probably binary
+        if (controls > limit / 10) // >10% controls => binary-ish
             return ContentKind.Binary;
 
-        // Skip leading whitespace
+        // Skip JSON whitespace (RFC 8259): SP, HT, LF, CR
         var j = 0;
         while (j < utf8.Length)
         {
             byte c = utf8[j];
 
-            switch (c)
+            if (c is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
             {
-                case (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n':
-                    j++;
-                    continue;
-                case (byte)'{' or (byte)'[':
-                    return ContentKind.Json;
-                case (byte)'<':
-                    return ContentKind.XmlOrHtml;
-                default:
-                    return ContentKind.Text;
+                j++;
+                continue;
             }
+
+            // JSON containers
+            if (c is (byte)'{' or (byte)'[') return ContentKind.Json;
+
+            // JSON top-level primitives: string, number, true/false/null
+            if (c == (byte)'"' || c == (byte)'-' || c is >= (byte)'0' and <= (byte)'9') 
+                return ContentKind.Json;
+
+            if (c is (byte)'t' or (byte)'f' or (byte)'n') 
+                return ContentKind.Json; // true/false/null
+
+            // XML/HTML
+            if (c == (byte)'<') 
+                return ContentKind.XmlOrHtml;
+
+            // Otherwise it's text (e.g., plain logs, CSV headers, JS without JSON shape)
+            return ContentKind.Text;
         }
 
         return ContentKind.Unknown;
     }
 
     /// <summary>Text → SHA-256 hex (UTF-8 by default)</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [Pure]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string ToSha256Hex(this ReadOnlySpan<char> text, Encoding? encoding = null, bool upperCase = true)
     {
         encoding ??= Encoding.UTF8;
