@@ -4,6 +4,7 @@ using System.Diagnostics.Contracts;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using Soenneker.Enums.ContentKinds;
 
 namespace Soenneker.Extensions.Spans.Readonly;
 
@@ -28,20 +29,71 @@ public static class ReadOnlySpanExtension
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool LooksLikeJson(this ReadOnlySpan<byte> utf8)
     {
-        // Skip UTF-8 BOM if present
+        return Classify(utf8) == ContentKind.Json;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool LooksLikeXmlOrHtml(this ReadOnlySpan<byte> utf8)
+    {
+        return Classify(utf8) == ContentKind.XmlOrHtml;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool LooksBinaryContent(this ReadOnlySpan<byte> utf8)
+    {
+        var k = Classify(utf8);
+        return k == ContentKind.Binary;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ContentKind Classify(this ReadOnlySpan<byte> utf8)
+    {
+        // Skip UTF-8 BOM
         if (utf8.Length >= 3 && utf8[0] == 0xEF && utf8[1] == 0xBB && utf8[2] == 0xBF)
             utf8 = utf8[3..];
 
-        // Skip leading whitespace
-        int i = 0;
-        while (i < utf8.Length)
+        if (utf8.IsEmpty)
+            return ContentKind.Unknown;
+
+        // Quick binary heuristic on a short head (controls or NULs)
+        int limit = Math.Min(utf8.Length, 512);
+        var controls = 0;
+
+        for (var i = 0; i < limit; i++)
         {
-            byte c = utf8[i];
-            if (c is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') { i++; continue; }
-            // Allow either object or array as first token
-            return c == (byte)'{' || c == (byte)'[';
+            byte b = utf8[i];
+            if (b == 0) 
+                return ContentKind.Binary; // NUL -> binary
+
+            // Count C0 controls except \t \n \r
+            if (b < 0x20 && b != (byte)'\t' && b != (byte)'\n' && b != (byte)'\r')
+                controls++;
         }
-        return false;
+
+        if (controls > limit / 10) // >10% controls -> probably binary
+            return ContentKind.Binary;
+
+        // Skip leading whitespace
+        var j = 0;
+        while (j < utf8.Length)
+        {
+            byte c = utf8[j];
+            if (c is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
+            {
+                j++;
+                continue;
+            }
+
+            if (c == (byte)'{' || c == (byte)'[') 
+                return ContentKind.Json;
+
+            if (c == (byte)'<') 
+                return ContentKind.XmlOrHtml; // includes XML and HTML
+
+            return ContentKind.Text;
+        }
+
+        return ContentKind.Unknown;
     }
 
     /// <summary>Text → SHA-256 hex (UTF-8 by default)</summary>
